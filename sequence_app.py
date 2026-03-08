@@ -107,6 +107,7 @@ def compose_board_image(board_grid: List[List[str]],
     width = COLS*(CARD_W+PADDING) + PADDING
     height = ROWS*(CARD_H+PADDING) + PADDING
     bg = Image.new("RGB", (width, height), color=BOARD_BG)
+    bg.paste(card_img, (x, y), mask=card_img.split()[3])
     x0 = PADDING
     y0 = PADDING
     for r in range(ROWS):
