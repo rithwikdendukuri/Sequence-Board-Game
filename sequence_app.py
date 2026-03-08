@@ -1,6 +1,7 @@
 import streamlit as st
 import numpy as np
 import random
+import matplotlib.pyplot as plt
 
 BOARD_SIZE = 10
 SEQ = 5
@@ -9,7 +10,7 @@ AI = 1
 
 
 # -----------------------------
-# Board utilities
+# Board Utilities
 # -----------------------------
 def create_board():
     board = np.full((BOARD_SIZE, BOARD_SIZE), -1)
@@ -24,10 +25,12 @@ def place(board, empty, move, player):
 
 
 def check_sequence(board, player, move):
+
     x, y = move
     dirs = [(1,0),(0,1),(1,1),(1,-1)]
 
     for dx,dy in dirs:
+
         count = 1
 
         for step in range(1,SEQ):
@@ -57,7 +60,6 @@ def simulate_game():
 
     board, empty = create_board()
     player = HUMAN
-
     moves = []
 
     for _ in range(100):
@@ -76,7 +78,7 @@ def simulate_game():
 
 
 # -----------------------------
-# Markov Chain Construction
+# Markov Matrix
 # -----------------------------
 def build_markov_matrix(move_lists):
 
@@ -84,20 +86,36 @@ def build_markov_matrix(move_lists):
     M = np.zeros((size, size))
 
     for moves in move_lists:
+
         for i in range(len(moves)-1):
 
             a = moves[i][0]*BOARD_SIZE + moves[i][1]
             b = moves[i+1][0]*BOARD_SIZE + moves[i+1][1]
 
-            M[a][b] += 1
+            M[a,b] += 1
 
     row_sums = M.sum(axis=1)
 
-    for i in range(len(row_sums)):
+    for i in range(size):
         if row_sums[i] > 0:
             M[i] /= row_sums[i]
 
     return M
+
+
+# -----------------------------
+# Stationary Distribution
+# -----------------------------
+def stationary_distribution(P):
+
+    eigvals, eigvecs = np.linalg.eig(P.T)
+
+    idx = np.argmin(np.abs(eigvals - 1))
+
+    vec = np.real(eigvecs[:, idx])
+    vec = vec / vec.sum()
+
+    return vec, eigvals
 
 
 # -----------------------------
@@ -107,12 +125,17 @@ def run_simulations(num_games):
 
     results = []
     move_lists = []
+    move_counts = np.zeros((BOARD_SIZE,BOARD_SIZE))
 
     for _ in range(num_games):
 
         winner, moves = simulate_game()
+
         results.append(winner)
         move_lists.append(moves)
+
+        for m in moves:
+            move_counts[m] += 1
 
     results = np.array(results)
 
@@ -123,44 +146,60 @@ def run_simulations(num_games):
 
     markov = build_markov_matrix(move_lists)
 
-    eigvals, eigvecs = np.linalg.eig(markov)
+    stationary, eigvals = stationary_distribution(markov)
 
-    principal_vector = np.real(eigvecs[:,0])
+    influence_map = stationary.reshape(BOARD_SIZE,BOARD_SIZE)
 
-    heatmap = principal_vector.reshape(BOARD_SIZE, BOARD_SIZE)
-
-    return ai_wins, human_wins, winrate, heatmap
+    return ai_wins, human_wins, winrate, influence_map, move_counts, eigvals
 
 
 # -----------------------------
 # Streamlit UI
 # -----------------------------
-st.title("Sequence AI Mathematical Analysis")
+st.title("Sequence Strategy Mathematical Analysis")
 
-st.write("Fast Monte Carlo simulation with Markov chains and eigenvector analysis.")
+st.write(
+"Monte Carlo simulation with Markov chains and eigenvector analysis of board influence."
+)
 
 num_games = st.slider(
-    "Number of games to simulate",
-    min_value=10,
-    max_value=200,
-    value=50,
-    step=10
+"Number of games",
+10,
+500,
+100,
+10
 )
 
 if st.button("Run Simulation"):
 
-    ai_wins, human_wins, winrate, heatmap = run_simulations(num_games)
+    ai_wins, human_wins, winrate, influence_map, move_counts, eigvals = run_simulations(num_games)
 
-    st.subheader("Game Results")
+    st.subheader("Game Outcomes")
 
-    st.write("AI Wins:", ai_wins)
-    st.write("Human Wins:", human_wins)
+    fig1, ax1 = plt.subplots()
+    ax1.bar(["AI Wins","Human Wins"], [ai_wins, human_wins])
+    st.pyplot(fig1)
+
     st.write("AI Win Rate:", round(winrate,3))
 
-    st.subheader("Eigenvector Board Influence Map")
+    st.subheader("Move Frequency Heatmap")
 
-    st.write(
-        "This matrix shows which board positions dominate the Markov transition dynamics."
-    )
+    fig2, ax2 = plt.subplots()
+    im = ax2.imshow(move_counts)
+    plt.colorbar(im)
+    st.pyplot(fig2)
 
-    st.dataframe(heatmap)
+    st.subheader("Markov Stationary Distribution (Board Influence)")
+
+    fig3, ax3 = plt.subplots()
+    im = ax3.imshow(influence_map)
+    plt.colorbar(im)
+    st.pyplot(fig3)
+
+    st.subheader("Eigenvalue Spectrum")
+
+    fig4, ax4 = plt.subplots()
+    ax4.scatter(np.real(eigvals), np.imag(eigvals))
+    ax4.set_xlabel("Real")
+    ax4.set_ylabel("Imaginary")
+    st.pyplot(fig4)
