@@ -1,219 +1,157 @@
 import numpy as np
+import random
+from collections import Counter
+from itertools import product
 
-# -------------------------------
-# Constants & Game Setup
-# -------------------------------
+# -----------------------------
+# Constants
+# -----------------------------
 BOARD_SIZE = 10
 SEQUENCE_LENGTH = 5
-CORNER_POS = [(0, 0), (0, 9), (9, 0), (9, 9)]
-STRATEGIES = ["random", "greedy", "probabilistic"]
+NUM_SIMULATIONS = 50  # 50 games per AI strategy
+HUMAN = 0
+AI = 1
 
-# -------------------------------
-# Helper Functions
-# -------------------------------
-def initialize_board():
-    board = np.zeros((BOARD_SIZE, BOARD_SIZE))
-    for (x, y) in CORNER_POS:
-        board[x, y] = 0.5  # corners count as wild
-    return board
+# Card representation simplified for quant analysis
+SUITS = ['♠', '♥', '♦', '♣']
+NUM_CARDS = list(range(2, 11)) + ['J', 'Q', 'K', 'A']
 
-def check_sequence(board, player_id):
-    count = 0
-    for i in range(BOARD_SIZE):
-        for j in range(BOARD_SIZE - SEQUENCE_LENGTH + 1):
-            if np.all(board[i, j:j+SEQUENCE_LENGTH] == player_id) or np.sum(board[i, j:j+SEQUENCE_LENGTH] == 0.5) > 0:
-                count += 1
-            if np.all(board[j:j+SEQUENCE_LENGTH, i] == player_id) or np.sum(board[j:j+SEQUENCE_LENGTH, i] == 0.5) > 0:
-                count += 1
-    for i in range(BOARD_SIZE - SEQUENCE_LENGTH + 1):
-        for j in range(BOARD_SIZE - SEQUENCE_LENGTH + 1):
-            diag1 = [board[i+k, j+k] for k in range(SEQUENCE_LENGTH)]
-            diag2 = [board[i+k, j+SEQUENCE_LENGTH-1-k] for k in range(SEQUENCE_LENGTH)]
-            if np.all(np.array(diag1) == player_id) or np.sum(np.array(diag1) == 0.5) > 0:
-                count += 1
-            if np.all(np.array(diag2) == player_id) or np.sum(np.array(diag2) == 0.5) > 0:
-                count += 1
-    return count
+# -----------------------------
+# Board & Game Utilities
+# -----------------------------
+def create_board():
+    """Create a 10x10 board with None."""
+    return np.full((BOARD_SIZE, BOARD_SIZE), None)
 
-def get_available_moves(board):
-    return [(i, j) for i in range(BOARD_SIZE) for j in range(BOARD_SIZE) if board[i, j] == 0]
+def place_chip(board, pos, player):
+    """Place a chip if legal."""
+    x, y = pos
+    if board[x, y] is None:
+        board[x, y] = player
+        return True
+    return False
 
-def select_move(board, player_id, strategy):
-    moves = get_available_moves(board)
+def check_sequence(board, player, last_move):
+    """Check if last move formed a sequence."""
+    x, y = last_move
+    directions = [(1,0),(0,1),(1,1),(1,-1)]
+    for dx, dy in directions:
+        count = 1
+        # Forward
+        for step in range(1, SEQUENCE_LENGTH):
+            nx, ny = x+dx*step, y+dy*step
+            if 0 <= nx < BOARD_SIZE and 0 <= ny < BOARD_SIZE and board[nx, ny]==player:
+                count +=1
+            else:
+                break
+        # Backward
+        for step in range(1, SEQUENCE_LENGTH):
+            nx, ny = x-dx*step, y-dy*step
+            if 0 <= nx < BOARD_SIZE and 0 <= ny < BOARD_SIZE and board[nx, ny]==player:
+                count +=1
+            else:
+                break
+        if count >= SEQUENCE_LENGTH:
+            return True
+    return False
+
+def legal_moves(board):
+    """Return list of empty positions."""
+    return [(i,j) for i,j in product(range(BOARD_SIZE), repeat=2) if board[i,j] is None]
+
+# -----------------------------
+# AI Utilities
+# -----------------------------
+def simple_ai(board, player):
+    """AI chooses a move near existing chips (basic heuristic)."""
+    moves = legal_moves(board)
     if not moves:
         return None
-    if strategy == "random":
-        return moves[np.random.choice(len(moves))]
-    elif strategy == "greedy":
-        best_score = -1
-        best_move = moves[0]
-        for move in moves:
-            temp = board.copy()
-            temp[move] = player_id
-            score = check_sequence(temp, player_id)
-            if score > best_score:
-                best_score = score
-                best_move = move
-        return best_move
-    elif strategy == "probabilistic":
-        scores = []
-        for move in moves:
-            x, y = move
-            adjacent = board[max(0,x-1):min(BOARD_SIZE,x+2), max(0,y-1):min(BOARD_SIZE,y+2)]
-            score = np.sum(adjacent == player_id)
-            scores.append(score + 1e-3*np.random.rand())
-        scores = np.array(scores)
-        probs = scores / np.sum(scores)
-        return moves[np.random.choice(len(moves), p=probs)]
+    # Favor positions adjacent to own chips
+    weights = []
+    for x,y in moves:
+        score = 0
+        for dx,dy in product([-1,0,1],repeat=2):
+            nx, ny = x+dx, y+dy
+            if 0<=nx<BOARD_SIZE and 0<=ny<BOARD_SIZE and board[nx,ny]==player:
+                score +=1
+        weights.append(score+1)  # avoid 0
+    chosen = random.choices(moves, weights=weights, k=1)[0]
+    print(f"AI ({player}) thinking... chooses move {chosen}")
+    return chosen
 
-# -------------------------------
-# Simulation Engine
-# -------------------------------
-def simulate_game(strategy1, strategy2, heatmap=None):
-    board = initialize_board()
-    moves = []
-    player_ids = [1, 2]
-    strategies = [strategy1, strategy2]
-    current_player = 0
-
-    while True:
-        player_id = player_ids[current_player]
-        move = select_move(board, player_id, strategies[current_player])
+# -----------------------------
+# Simulation & Statistics
+# -----------------------------
+def simulate_game(human_first=True, human_strategy=False):
+    """Simulate a full game, return winner and move matrix."""
+    board = create_board()
+    move_matrix = np.zeros((BOARD_SIZE, BOARD_SIZE))
+    player_turn = HUMAN if human_first else AI
+    moves_played = 0
+    winner = None
+    
+    while moves_played < BOARD_SIZE*BOARD_SIZE:
+        if player_turn == HUMAN and human_strategy:
+            # For research, simulate human randomly
+            move = random.choice(legal_moves(board))
+        else:
+            move = simple_ai(board, player_turn)
+        
         if move is None:
             break
-        board[move] = player_id
-        moves.append((current_player+1, move))
-        if heatmap is not None:
-            heatmap[move] += 1
-        sequences = check_sequence(board, player_id)
-        if sequences >= 2:
-            winner = current_player+1
+        place_chip(board, move, player_turn)
+        move_matrix[move] +=1
+        moves_played +=1
+        
+        if check_sequence(board, player_turn, move):
+            winner = player_turn
             break
-        current_player = 1 - current_player
+        player_turn = AI if player_turn==HUMAN else HUMAN
+    return winner, move_matrix
 
-    game_stats = {
-        "winner": winner,
-        "num_moves": len(moves),
-        "move_sequence": moves,
-        "final_board": board
-    }
-    return game_stats
-
-def run_simulations(num_games=500):
-    heatmap_greedy = np.zeros((BOARD_SIZE, BOARD_SIZE))
-    heatmap_prob = np.zeros((BOARD_SIZE, BOARD_SIZE))
-    results_greedy = []
-    results_prob = []
-
+def run_simulations(num_games=NUM_SIMULATIONS, human_strategy=False):
+    """Run multiple games and collect statistics."""
+    results = []
+    combined_matrix = np.zeros((BOARD_SIZE, BOARD_SIZE))
     for _ in range(num_games):
-        game = simulate_game("greedy", "probabilistic", heatmap_greedy)
-        results_greedy.append(game)
-        game = simulate_game("probabilistic", "greedy", heatmap_prob)
-        results_prob.append(game)
-
-    heatmap_greedy /= np.max(heatmap_greedy)
-    heatmap_prob /= np.max(heatmap_prob)
-
-    return results_greedy, results_prob, heatmap_greedy, heatmap_prob
-
-# -------------------------------
-# Manual Statistics
-# -------------------------------
-def mean_std_ci(data):
-    n = len(data)
-    mean_val = np.mean(data)
-    std_val = np.std(data, ddof=1)
-    ci = (mean_val - 1.96*std_val/np.sqrt(n), mean_val + 1.96*std_val/np.sqrt(n))
-    return mean_val, std_val, ci
-
-def z_test_proportion(success_a, success_b, n):
-    p1, p2 = success_a/n, success_b/n
-    p_pool = (success_a+success_b)/(2*n)
-    z = (p1 - p2)/np.sqrt(p_pool*(1-p_pool)*(2/n))
-    return z
-
-def chi2_test(table):
-    total = np.sum(table)
-    expected = np.outer(np.sum(table, axis=1), np.sum(table, axis=0)) / total
-    chi2 = np.sum((table - expected)**2 / expected)
-    return chi2
-
-def compute_statistics(results):
-    num_moves = np.array([g["num_moves"] for g in results])
-    winners = np.array([g["winner"] for g in results])
-
-    mean_moves, std_moves, ci_moves = mean_std_ci(num_moves)
-    win_rate_1 = np.mean(winners==1)
-    win_rate_2 = np.mean(winners==2)
-    z_stat = z_test_proportion(np.sum(winners==1), np.sum(winners==2), len(winners))
-
-    table = np.zeros((2,2))
-    for g in results:
-        table[0, g["winner"]-1] += 1
-    chi2_stat = chi2_test(table)
-
-    summary = {
-        "mean_moves": mean_moves,
-        "std_moves": std_moves,
-        "ci_moves": ci_moves,
-        "win_rate_1": win_rate_1,
-        "win_rate_2": win_rate_2,
-        "z_test_win_rate": z_stat,
-        "chi2_starting_vs_winner": chi2_stat
+        winner, move_matrix = simulate_game(human_strategy=human_strategy)
+        results.append(winner)
+        combined_matrix += move_matrix
+    results = np.array(results)
+    
+    # Sample statistics
+    mean_seq = np.mean(results==AI)
+    var_seq = np.var(results==AI)
+    
+    # Covariance of moves
+    flat_matrix = combined_matrix.flatten()
+    cov = np.cov(flat_matrix, rowvar=False)
+    
+    # PCA (eigenvectors of covariance)
+    eigvals, eigvecs = np.linalg.eig(cov.reshape(-1,1))
+    
+    return {
+        "win_rate_AI": mean_seq,
+        "variance": var_seq,
+        "combined_move_matrix": combined_matrix,
+        "covariance": cov,
+        "pca_eigenvalues": eigvals
     }
-    return summary
 
-# -------------------------------
-# PCA / Linear Algebra Analysis
-# -------------------------------
-def pca_analysis(results):
-    # Flatten all final boards into vectors
-    board_vectors = np.array([g["final_board"].flatten() for g in results])
-    # Center data
-    mean_vector = np.mean(board_vectors, axis=0)
-    centered = board_vectors - mean_vector
-    # Covariance
-    cov = np.cov(centered.T)
-    # Eigen decomposition
-    eigvals, eigvecs = np.linalg.eigh(cov)
-    # Sort descending
-    idx = np.argsort(eigvals)[::-1]
-    eigvals, eigvecs = eigvals[idx], eigvecs[:, idx]
-    explained_variance = eigvals / np.sum(eigvals)
-    top_vectors = eigvecs[:, :5]  # top 5 patterns
-    return explained_variance[:5], top_vectors
-
-# -------------------------------
-# Text Heatmap Display
-# -------------------------------
-def display_heatmap(heatmap):
-    print("\nHeatmap (normalized 0-1):")
-    for row in heatmap:
-        print(" ".join(f"{val:.2f}" for val in row))
-
-# -------------------------------
-# Run Full Pipeline
-# -------------------------------
-if __name__ == "__main__":
-    print("Running simulations for quant analysis...")
-    results_greedy, results_prob, heat_greedy, heat_prob = run_simulations(num_games=500)
-
-    summary_greedy = compute_statistics(results_greedy)
-    summary_prob = compute_statistics(results_prob)
-
-    print("\n--- Greedy AI Summary ---")
-    print(summary_greedy)
-    print("\n--- Probabilistic AI Summary ---")
-    print(summary_prob)
-
-    print("\nDisplaying text-based heatmaps...")
-    print("Greedy AI:")
-    display_heatmap(heat_greedy)
-    print("\nProbabilistic AI:")
-    display_heatmap(heat_prob)
-
-    print("\nPerforming PCA / Linear Algebra Analysis on final boards...")
-    ev, top_patterns = pca_analysis(results_greedy)
-    print("Top 5 explained variance (Greedy AI):", ev)
-    print("Top 5 principal patterns (flattened vectors):")
-    print(top_patterns)
+# -----------------------------
+# Main Execution
+# -----------------------------
+if __name__=="__main__":
+    print("Running AI vs AI simulations for research analysis...")
+    stats_ai = run_simulations()
+    print("AI Win Rate:", stats_ai['win_rate_AI'])
+    print("Variance of wins:", stats_ai['variance'])
+    print("Top PCA Eigenvalue:", stats_ai['pca_eigenvalues'][0])
+    print("Combined Move Matrix:\n", stats_ai['combined_move_matrix'])
+    
+    print("\nHuman vs AI simulation (random human moves for testing)...")
+    stats_human = run_simulations(human_strategy=True)
+    print("AI Win Rate:", stats_human['win_rate_AI'])
+    print("Variance of wins:", stats_human['variance'])
+    print("Top PCA Eigenvalue:", stats_human['pca_eigenvalues'][0])
