@@ -74,7 +74,7 @@ def draw_card_image(card: str,
     if card == "WILD" or corner_wild:
         draw.rectangle([6,22,CARD_W-6,CARD_H-14], fill=(240,240,210))
         draw.text((CARD_W//2, CARD_H//2-8), "WILD", anchor="mm", font=FONT_MED, fill=(180,30,30))
-        draw.ellipse([CARD_W//2-18, CARD_H-12, CARD_W//2+18, CARD_H-36], outline=(200,100,0), width=3)
+        draw.ellipse([CARD_W//2-18, CARD_H-36, CARD_W//2+18, CARD_H-12], outline=(200,100,0), width=3)
     else:
         # draw rank and suit
         # determine suit glyph color
