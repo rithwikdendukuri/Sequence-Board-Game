@@ -1,6 +1,4 @@
 import numpy as np
-from scipy import stats
-from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -19,7 +17,7 @@ STRATEGIES = ["random", "greedy", "probabilistic"]
 def initialize_board():
     board = np.zeros((BOARD_SIZE, BOARD_SIZE))
     for (x, y) in CORNER_POS:
-        board[x, y] = 0.5
+        board[x, y] = 0.5  # corners count as wild
     return board
 
 def check_sequence(board, player_id):
@@ -89,7 +87,6 @@ def simulate_game(strategy1, strategy2, heatmap=None):
         board[move] = player_id
         moves.append((current_player+1, move))
         if heatmap is not None:
-            # Increment heatmap only if player 1 is placing (can track for either player)
             heatmap[move] += 1
         sequences = check_sequence(board, player_id)
         if sequences >= 2:
@@ -105,15 +102,44 @@ def simulate_game(strategy1, strategy2, heatmap=None):
     }
     return game_stats
 
-def run_simulations(num_games=1000):
-    heatmap = np.zeros((BOARD_SIZE, BOARD_SIZE))
-    results = []
+def run_simulations(num_games=500):
+    heatmap_greedy = np.zeros((BOARD_SIZE, BOARD_SIZE))
+    heatmap_prob = np.zeros((BOARD_SIZE, BOARD_SIZE))
+    results_greedy = []
+    results_prob = []
+
     for _ in range(num_games):
-        game = simulate_game("greedy", "probabilistic", heatmap)
-        results.append(game)
-    # Normalize heatmap
-    heatmap = heatmap / np.max(heatmap)
-    return results, heatmap
+        game = simulate_game("greedy", "probabilistic", heatmap_greedy)
+        results_greedy.append(game)
+        game = simulate_game("probabilistic", "greedy", heatmap_prob)
+        results_prob.append(game)
+
+    heatmap_greedy /= np.max(heatmap_greedy)
+    heatmap_prob /= np.max(heatmap_prob)
+
+    return results_greedy, results_prob, heatmap_greedy, heatmap_prob
+
+# -------------------------------
+# Manual Statistics Functions
+# -------------------------------
+def mean_std_ci(data):
+    n = len(data)
+    mean_val = np.mean(data)
+    std_val = np.std(data, ddof=1)
+    ci = (mean_val - 1.96*std_val/np.sqrt(n), mean_val + 1.96*std_val/np.sqrt(n))
+    return mean_val, std_val, ci
+
+def z_test_proportion(success_a, success_b, n):
+    p1, p2 = success_a/n, success_b/n
+    p_pool = (success_a+success_b)/(2*n)
+    z = (p1 - p2)/np.sqrt(p_pool*(1-p_pool)*(2/n))
+    return z
+
+def chi2_test(table):
+    total = np.sum(table)
+    expected = np.outer(np.sum(table, axis=1), np.sum(table, axis=0)) / total
+    chi2 = np.sum((table - expected)**2 / expected)
+    return chi2
 
 # -------------------------------
 # Quant Analysis
@@ -122,66 +148,52 @@ def compute_statistics(results):
     num_moves = np.array([g["num_moves"] for g in results])
     winners = np.array([g["winner"] for g in results])
 
-    mean_moves = np.mean(num_moves)
-    std_moves = np.std(num_moves, ddof=1)
-    ci_95 = stats.t.interval(0.95, len(num_moves)-1, loc=mean_moves, scale=std_moves/np.sqrt(len(num_moves)))
-
+    mean_moves, std_moves, ci_moves = mean_std_ci(num_moves)
     win_rate_1 = np.mean(winners==1)
     win_rate_2 = np.mean(winners==2)
-    z_stat, p_val = stats.proportions_ztest([np.sum(winners==1), np.sum(winners==2)], [len(winners), len(winners)])
-
-    board_vectors = [g["final_board"].flatten() for g in results]
-    board_matrix = np.array(board_vectors)
-    pca = PCA(n_components=2)
-    pca.fit(board_matrix)
-    explained_variance = pca.explained_variance_ratio_
+    z_stat = z_test_proportion(np.sum(winners==1), np.sum(winners==2), len(winners))
 
     table = np.zeros((2,2))
     for g in results:
-        starting_player = 1
-        winner = g["winner"]
-        table[starting_player-1, winner-1] += 1
-    chi2_stat, chi2_p, _, _ = stats.chi2_contingency(table)
+        table[0, g["winner"]-1] += 1
+    chi2_stat = chi2_test(table)
 
     summary = {
         "mean_moves": mean_moves,
         "std_moves": std_moves,
-        "ci_95_moves": ci_95,
+        "ci_moves": ci_moves,
         "win_rate_1": win_rate_1,
         "win_rate_2": win_rate_2,
-        "z_test_win_rate": (z_stat, p_val),
-        "pca_explained_variance": explained_variance,
-        "chi2_starting_vs_winner": (chi2_stat, chi2_p)
+        "z_test_win_rate": z_stat,
+        "chi2_starting_vs_winner": chi2_stat
     }
     return summary
 
 # -------------------------------
 # Heatmap Visualization
 # -------------------------------
-def plot_heatmap(heatmap):
-    plt.figure(figsize=(8,6))
-    sns.heatmap(heatmap, annot=True, fmt=".2f", cmap="coolwarm")
-    plt.title("Board Position Value Heatmap (Normalized)")
-    plt.xlabel("Column")
-    plt.ylabel("Row")
+def plot_heatmaps(heatmap1, heatmap2):
+    fig, axes = plt.subplots(1, 2, figsize=(16,6))
+    sns.heatmap(heatmap1, annot=False, cmap="Reds", ax=axes[0])
+    axes[0].set_title("Greedy AI Board Value")
+    sns.heatmap(heatmap2, annot=False, cmap="Blues", ax=axes[1])
+    axes[1].set_title("Probabilistic AI Board Value")
     plt.show()
 
 # -------------------------------
 # Run Pipeline
 # -------------------------------
 if __name__ == "__main__":
-    print("Running 1000 simulations...")
-    results, heatmap = run_simulations(num_games=1000)
-    summary = compute_statistics(results)
+    print("Running simulations for heatmap comparison...")
+    results_greedy, results_prob, heat_greedy, heat_prob = run_simulations(num_games=500)
 
-    print("\n--- Quantitative Summary ---")
-    print(f"Mean moves to win: {summary['mean_moves']:.2f} ± {summary['std_moves']:.2f}")
-    print(f"95% CI for moves: {summary['ci_95_moves']}")
-    print(f"Win rate Player 1: {summary['win_rate_1']:.2%}")
-    print(f"Win rate Player 2: {summary['win_rate_2']:.2%}")
-    print(f"Z-test for win rate difference: z={summary['z_test_win_rate'][0]:.3f}, p={summary['z_test_win_rate'][1]:.3f}")
-    print(f"PCA explained variance (top 2 components): {summary['pca_explained_variance']}")
-    print(f"Chi-square starting player vs winner: chi2={summary['chi2_starting_vs_winner'][0]:.3f}, p={summary['chi2_starting_vs_winner'][1]:.3f}")
+    summary_greedy = compute_statistics(results_greedy)
+    summary_prob = compute_statistics(results_prob)
 
-    print("\nGenerating strategy heatmap...")
-    plot_heatmap(heatmap)
+    print("\n--- Greedy AI Summary ---")
+    print(summary_greedy)
+    print("\n--- Probabilistic AI Summary ---")
+    print(summary_prob)
+
+    print("\nGenerating side-by-side strategy heatmaps...")
+    plot_heatmaps(heat_greedy, heat_prob)
