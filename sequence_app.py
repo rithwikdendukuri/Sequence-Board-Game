@@ -1,6 +1,4 @@
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 # -------------------------------
 # Constants & Game Setup
@@ -8,7 +6,6 @@ import seaborn as sns
 BOARD_SIZE = 10
 SEQUENCE_LENGTH = 5
 CORNER_POS = [(0, 0), (0, 9), (9, 0), (9, 9)]
-
 STRATEGIES = ["random", "greedy", "probabilistic"]
 
 # -------------------------------
@@ -70,7 +67,7 @@ def select_move(board, player_id, strategy):
         return moves[np.random.choice(len(moves), p=probs)]
 
 # -------------------------------
-# Simulation Engine with Heatmap Tracking
+# Simulation Engine
 # -------------------------------
 def simulate_game(strategy1, strategy2, heatmap=None):
     board = initialize_board()
@@ -120,7 +117,7 @@ def run_simulations(num_games=500):
     return results_greedy, results_prob, heatmap_greedy, heatmap_prob
 
 # -------------------------------
-# Manual Statistics Functions
+# Manual Statistics
 # -------------------------------
 def mean_std_ci(data):
     n = len(data)
@@ -141,9 +138,6 @@ def chi2_test(table):
     chi2 = np.sum((table - expected)**2 / expected)
     return chi2
 
-# -------------------------------
-# Quant Analysis
-# -------------------------------
 def compute_statistics(results):
     num_moves = np.array([g["num_moves"] for g in results])
     winners = np.array([g["winner"] for g in results])
@@ -170,21 +164,38 @@ def compute_statistics(results):
     return summary
 
 # -------------------------------
-# Heatmap Visualization
+# PCA / Linear Algebra Analysis
 # -------------------------------
-def plot_heatmaps(heatmap1, heatmap2):
-    fig, axes = plt.subplots(1, 2, figsize=(16,6))
-    sns.heatmap(heatmap1, annot=False, cmap="Reds", ax=axes[0])
-    axes[0].set_title("Greedy AI Board Value")
-    sns.heatmap(heatmap2, annot=False, cmap="Blues", ax=axes[1])
-    axes[1].set_title("Probabilistic AI Board Value")
-    plt.show()
+def pca_analysis(results):
+    # Flatten all final boards into vectors
+    board_vectors = np.array([g["final_board"].flatten() for g in results])
+    # Center data
+    mean_vector = np.mean(board_vectors, axis=0)
+    centered = board_vectors - mean_vector
+    # Covariance
+    cov = np.cov(centered.T)
+    # Eigen decomposition
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    # Sort descending
+    idx = np.argsort(eigvals)[::-1]
+    eigvals, eigvecs = eigvals[idx], eigvecs[:, idx]
+    explained_variance = eigvals / np.sum(eigvals)
+    top_vectors = eigvecs[:, :5]  # top 5 patterns
+    return explained_variance[:5], top_vectors
 
 # -------------------------------
-# Run Pipeline
+# Text Heatmap Display
+# -------------------------------
+def display_heatmap(heatmap):
+    print("\nHeatmap (normalized 0-1):")
+    for row in heatmap:
+        print(" ".join(f"{val:.2f}" for val in row))
+
+# -------------------------------
+# Run Full Pipeline
 # -------------------------------
 if __name__ == "__main__":
-    print("Running simulations for heatmap comparison...")
+    print("Running simulations for quant analysis...")
     results_greedy, results_prob, heat_greedy, heat_prob = run_simulations(num_games=500)
 
     summary_greedy = compute_statistics(results_greedy)
@@ -195,5 +206,14 @@ if __name__ == "__main__":
     print("\n--- Probabilistic AI Summary ---")
     print(summary_prob)
 
-    print("\nGenerating side-by-side strategy heatmaps...")
-    plot_heatmaps(heat_greedy, heat_prob)
+    print("\nDisplaying text-based heatmaps...")
+    print("Greedy AI:")
+    display_heatmap(heat_greedy)
+    print("\nProbabilistic AI:")
+    display_heatmap(heat_prob)
+
+    print("\nPerforming PCA / Linear Algebra Analysis on final boards...")
+    ev, top_patterns = pca_analysis(results_greedy)
+    print("Top 5 explained variance (Greedy AI):", ev)
+    print("Top 5 principal patterns (flattened vectors):")
+    print(top_patterns)
