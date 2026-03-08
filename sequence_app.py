@@ -3,30 +3,29 @@ import numpy as np
 import random
 import matplotlib.pyplot as plt
 
-BOARD_SIZE = 10
+BOARD = 10
 SEQ = 5
-HUMAN = 0
-AI = 1
 
 
 # -----------------------------
-# Board Utilities
+# Board utilities
 # -----------------------------
+
 def create_board():
-    board = np.full((BOARD_SIZE, BOARD_SIZE), -1)
-    empty = [(i, j) for i in range(BOARD_SIZE) for j in range(BOARD_SIZE)]
+    board = np.full((BOARD,BOARD), -1)
+    empty = [(i,j) for i in range(BOARD) for j in range(BOARD)]
     return board, empty
 
 
 def place(board, empty, move, player):
-    x, y = move
-    board[x, y] = player
+    x,y = move
+    board[x,y] = player
     empty.remove(move)
 
 
 def check_sequence(board, player, move):
 
-    x, y = move
+    x,y = move
     dirs = [(1,0),(0,1),(1,1),(1,-1)]
 
     for dx,dy in dirs:
@@ -35,14 +34,14 @@ def check_sequence(board, player, move):
 
         for step in range(1,SEQ):
             nx,ny = x+dx*step,y+dy*step
-            if 0<=nx<BOARD_SIZE and 0<=ny<BOARD_SIZE and board[nx,ny]==player:
+            if 0<=nx<BOARD and 0<=ny<BOARD and board[nx,ny]==player:
                 count+=1
             else:
                 break
 
         for step in range(1,SEQ):
             nx,ny = x-dx*step,y-dy*step
-            if 0<=nx<BOARD_SIZE and 0<=ny<BOARD_SIZE and board[nx,ny]==player:
+            if 0<=nx<BOARD and 0<=ny<BOARD and board[nx,ny]==player:
                 count+=1
             else:
                 break
@@ -54,152 +53,292 @@ def check_sequence(board, player, move):
 
 
 # -----------------------------
+# Scoring functions
+# -----------------------------
+
+def adjacency(board,player,pos):
+
+    x,y=pos
+    score=0
+
+    for dx in [-1,0,1]:
+        for dy in [-1,0,1]:
+
+            nx,ny=x+dx,y+dy
+
+            if 0<=nx<BOARD and 0<=ny<BOARD:
+                if board[nx,ny]==player:
+                    score+=1
+
+    return score
+
+
+def line_extension(board,player,pos):
+
+    x,y=pos
+    dirs=[(1,0),(0,1),(1,1),(1,-1)]
+    score=0
+
+    for dx,dy in dirs:
+
+        count=0
+
+        for step in range(1,SEQ):
+            nx,ny=x+dx*step,y+dy*step
+            if 0<=nx<BOARD and 0<=ny<BOARD and board[nx,ny]==player:
+                count+=1
+            else:
+                break
+
+        for step in range(1,SEQ):
+            nx,ny=x-dx*step,y-dy*step
+            if 0<=nx<BOARD and 0<=ny<BOARD and board[nx,ny]==player:
+                count+=1
+            else:
+                break
+
+        score+=count
+
+    return score
+
+
+def heuristic_score(board,player,opponent,pos):
+
+    extend=line_extension(board,player,pos)
+    block=line_extension(board,opponent,pos)
+    cluster=adjacency(board,player,pos)
+
+    return 3*extend+2*block+cluster
+
+
+# -----------------------------
+# AI Strategies
+# -----------------------------
+
+def random_ai(board,empty,player):
+    return random.choice(empty)
+
+
+def greedy_ai(board,empty,player):
+
+    scores=[adjacency(board,player,p) for p in empty]
+
+    m=max(scores)
+
+    candidates=[empty[i] for i,s in enumerate(scores) if s==m]
+
+    return random.choice(candidates)
+
+
+def heuristic_ai(board,empty,player):
+
+    opponent=1-player
+
+    scores=[heuristic_score(board,player,opponent,p) for p in empty]
+
+    m=max(scores)
+
+    candidates=[empty[i] for i,s in enumerate(scores) if s==m]
+
+    return random.choice(candidates)
+
+
+def probabilistic_ai(board,empty,player):
+
+    opponent=1-player
+
+    scores=np.array([heuristic_score(board,player,opponent,p) for p in empty])
+
+    probs=np.exp(scores)/np.sum(np.exp(scores))
+
+    idx=np.random.choice(len(empty),p=probs)
+
+    return empty[idx]
+
+
+STRATEGIES={
+    "Random":random_ai,
+    "Greedy":greedy_ai,
+    "Heuristic":heuristic_ai,
+    "Probabilistic":probabilistic_ai
+}
+
+
+# -----------------------------
 # Simulation
 # -----------------------------
-def simulate_game():
 
-    board, empty = create_board()
-    player = HUMAN
-    moves = []
+def simulate_game(A,B):
+
+    board,empty=create_board()
+
+    player=0
+    moves=[]
 
     for _ in range(100):
 
-        move = random.choice(empty)
+        if player==0:
+            move=A(board,empty,player)
+        else:
+            move=B(board,empty,player)
+
         moves.append(move)
 
-        place(board, empty, move, player)
+        place(board,empty,move,player)
 
-        if check_sequence(board, player, move):
-            return player, moves
+        if check_sequence(board,player,move):
+            return player,moves
 
-        player = 1-player
+        player=1-player
 
-    return -1, moves
+    return -1,moves
 
 
 # -----------------------------
-# Markov Matrix
+# Markov / Centrality
 # -----------------------------
-def build_markov_matrix(move_lists):
 
-    size = BOARD_SIZE * BOARD_SIZE
-    M = np.zeros((size, size))
+def build_markov(move_lists):
+
+    N=BOARD*BOARD
+    M=np.zeros((N,N))
 
     for moves in move_lists:
 
         for i in range(len(moves)-1):
 
-            a = moves[i][0]*BOARD_SIZE + moves[i][1]
-            b = moves[i+1][0]*BOARD_SIZE + moves[i+1][1]
+            a=moves[i][0]*BOARD+moves[i][1]
+            b=moves[i+1][0]*BOARD+moves[i+1][1]
 
-            M[a,b] += 1
+            M[a,b]+=1
 
-    row_sums = M.sum(axis=1)
+    row=M.sum(axis=1)
 
-    for i in range(size):
-        if row_sums[i] > 0:
-            M[i] /= row_sums[i]
+    for i in range(N):
+        if row[i]>0:
+            M[i]/=row[i]
 
     return M
 
 
-# -----------------------------
-# Stationary Distribution
-# -----------------------------
-def stationary_distribution(P):
+def centrality(P):
 
-    eigvals, eigvecs = np.linalg.eig(P.T)
+    eigvals,eigvecs=np.linalg.eig(P.T)
 
-    idx = np.argmin(np.abs(eigvals - 1))
+    idx=np.argmin(np.abs(eigvals-1))
 
-    vec = np.real(eigvecs[:, idx])
-    vec = vec / vec.sum()
+    vec=np.real(eigvecs[:,idx])
+    vec/=vec.sum()
 
-    return vec, eigvals
+    return vec.reshape(BOARD,BOARD),eigvals
 
 
 # -----------------------------
 # Run simulations
 # -----------------------------
-def run_simulations(num_games):
 
-    results = []
-    move_lists = []
-    move_counts = np.zeros((BOARD_SIZE,BOARD_SIZE))
+def run_games(n,A,B):
 
-    for _ in range(num_games):
+    results=[]
+    movesets=[]
+    move_counts=np.zeros((BOARD,BOARD))
+    seq_counts=np.zeros((BOARD,BOARD))
 
-        winner, moves = simulate_game()
+    for _ in range(n):
+
+        winner,moves=simulate_game(A,B)
 
         results.append(winner)
-        move_lists.append(moves)
+        movesets.append(moves)
 
         for m in moves:
-            move_counts[m] += 1
+            move_counts[m]+=1
 
-    results = np.array(results)
+        if winner!=-1:
+            for m in moves[-SEQ:]:
+                seq_counts[m]+=1
 
-    ai_wins = np.sum(results == AI)
-    human_wins = np.sum(results == HUMAN)
+    P=build_markov(movesets)
 
-    winrate = ai_wins / num_games
+    central,eigs=centrality(P)
 
-    markov = build_markov_matrix(move_lists)
+    seq_prob=seq_counts/np.maximum(move_counts,1)
 
-    stationary, eigvals = stationary_distribution(markov)
-
-    influence_map = stationary.reshape(BOARD_SIZE,BOARD_SIZE)
-
-    return ai_wins, human_wins, winrate, influence_map, move_counts, eigvals
+    return results,move_counts,central,seq_prob,eigs
 
 
 # -----------------------------
-# Streamlit UI
+# UI
 # -----------------------------
-st.title("Sequence Strategy Mathematical Analysis")
 
-st.write(
-"Monte Carlo simulation with Markov chains and eigenvector analysis of board influence."
-)
+st.title("Sequence Strategy Explorer")
 
-num_games = st.slider(
-"Number of games",
-10,
-500,
-100,
-10
-)
+nerd=st.toggle("Nerd Mode (show math)")
+
+A_choice=st.selectbox("Player A Strategy",list(STRATEGIES.keys()))
+B_choice=st.selectbox("Player B Strategy",list(STRATEGIES.keys()))
+
+games=st.slider("Number of games",20,500,100)
 
 if st.button("Run Simulation"):
 
-    ai_wins, human_wins, winrate, influence_map, move_counts, eigvals = run_simulations(num_games)
+    results,move_counts,central,seq_prob,eigs=run_games(
+        games,
+        STRATEGIES[A_choice],
+        STRATEGIES[B_choice]
+    )
 
-    st.subheader("Game Outcomes")
+    winsA=sum(r==0 for r in results)
+    winsB=sum(r==1 for r in results)
 
-    fig1, ax1 = plt.subplots()
-    ax1.bar(["AI Wins","Human Wins"], [ai_wins, human_wins])
-    st.pyplot(fig1)
+    tab1,tab2,tab3,tab4,tab5=st.tabs([
+        "Results",
+        "Move Heatmap",
+        "Board Influence",
+        "Sequence Probability",
+        "Centrality Ranking"
+    ])
 
-    st.write("AI Win Rate:", round(winrate,3))
+    with tab1:
 
-    st.subheader("Move Frequency Heatmap")
+        fig,ax=plt.subplots()
+        ax.bar(["Player A","Player B"],[winsA,winsB])
+        st.pyplot(fig)
 
-    fig2, ax2 = plt.subplots()
-    im = ax2.imshow(move_counts)
-    plt.colorbar(im)
-    st.pyplot(fig2)
+        if nerd:
+            st.write("Win rate:",winsA/(winsA+winsB))
 
-    st.subheader("Markov Stationary Distribution (Board Influence)")
+    with tab2:
 
-    fig3, ax3 = plt.subplots()
-    im = ax3.imshow(influence_map)
-    plt.colorbar(im)
-    st.pyplot(fig3)
+        fig,ax=plt.subplots()
+        im=ax.imshow(move_counts)
+        plt.colorbar(im)
+        st.pyplot(fig)
 
-    st.subheader("Eigenvalue Spectrum")
+    with tab3:
 
-    fig4, ax4 = plt.subplots()
-    ax4.scatter(np.real(eigvals), np.imag(eigvals))
-    ax4.set_xlabel("Real")
-    ax4.set_ylabel("Imaginary")
-    st.pyplot(fig4)
+        fig,ax=plt.subplots()
+        im=ax.imshow(central)
+        plt.colorbar(im)
+        st.pyplot(fig)
+
+        if nerd:
+            st.write("Stationary distribution of the transition matrix.")
+
+    with tab4:
+
+        fig,ax=plt.subplots()
+        im=ax.imshow(seq_prob)
+        plt.colorbar(im)
+        st.pyplot(fig)
+
+    with tab5:
+
+        fig,ax=plt.subplots()
+        ax.scatter(np.real(eigs),np.imag(eigs))
+        ax.set_xlabel("Real")
+        ax.set_ylabel("Imaginary")
+        st.pyplot(fig)
+
+        if nerd:
+            st.write("Eigenvalue spectrum of the Markov transition matrix.")
