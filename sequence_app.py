@@ -306,7 +306,8 @@ if st.button("Run Simulation"):
         st.pyplot(fig)
 
         if nerd:
-            st.write("Win rate:",winsA/(winsA+winsB))
+            st.write("Win rate for player A:",winsA/(winsA+winsB))
+            st.write("Win rate for player B:",winsB/(winsA+winsB))
 
     with tab2:
 
