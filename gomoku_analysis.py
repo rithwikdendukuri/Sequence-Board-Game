@@ -13,7 +13,7 @@ SEQ = 5
 # ──────────────────────────────────────────────
 # Page config
 # ──────────────────────────────────────────────
-st.set_page_config(page_title="Sequence Strategy Explorer", layout="wide")
+st.set_page_config(page_title="Gomoku Strategy Explorer", layout="wide")
 
 st.markdown("""
 <style>
@@ -493,7 +493,7 @@ def dark_fig(w=5, h=4):
 # ══════════════════════════════════════════════
 # UI
 # ══════════════════════════════════════════════
-st.title("⬛ Sequence Strategy Explorer")
+st.title("⬛ Gomoku Strategy Explorer")
 st.caption("10×10 board · Markov analysis · ELO tournament · Spectral decomposition · Phase transitions")
 
 sidebar_tab, main_tab = st.tabs(["⚙️ Head-to-Head", "🏆 Tournament"])
